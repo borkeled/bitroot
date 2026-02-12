@@ -1,5 +1,5 @@
-$repoOwner = "borkeled"          # Change this
-$repoName = "bitroot"                 # Change this
+$repoOwner = "borkeled"          
+$repoName = "bitroot"                 
 $appName = "Bitware"
 $exeName = "bitware.exe"
 $installPath = "$env:LOCALAPPDATA\Bitware"
@@ -7,7 +7,6 @@ $versionFile = "$installPath\version.txt"
 
 # Check/Install VC++ Runtime
 function Install-VCRuntime {
-    # check if VC++ Runtime is installed by looking for the DLL
     $vcInstalled = Test-Path "$env:SystemRoot\System32\vcruntime140.dll"
     
     if (-not $vcInstalled) {
@@ -26,20 +25,53 @@ function Install-VCRuntime {
     }
 }
 
-
-# Get Latest Version from GitHub
+# get Latest Version from GitHub
 function Get-LatestRelease {
+    # first try to get the latest release
     $apiUrl = "https://api.github.com/repos/$repoOwner/$repoName/releases/latest"
+    
+    Write-Host "[DEBUG] Trying API URL: $apiUrl" -ForegroundColor DarkGray
+    
     try {
         $release = Invoke-RestMethod -Uri $apiUrl -Headers @{"User-Agent"="BitwareInstaller"}
+        Write-Host "[DEBUG] Found latest release: $($release.tag_name)" -ForegroundColor DarkGray
         return $release
     } catch {
-        Write-Host "Error: Could not reach GitHub. Check your internet connection." -ForegroundColor Red
-        exit 1
+        Write-Host "[DEBUG] No 'latest' release found, getting all releases..." -ForegroundColor Yellow
+        
+        # if no "latest" release get all releases and pick the first one
+        $allReleasesUrl = "https://api.github.com/repos/$repoOwner/$repoName/releases"
+        try {
+            $releases = Invoke-RestMethod -Uri $allReleasesUrl -Headers @{"User-Agent"="BitwareInstaller"}
+            
+            if ($releases.Count -eq 0) {
+                Write-Host "Error: No releases found in repository!" -ForegroundColor Red
+                Write-Host "Make sure you've created a release on GitHub" -ForegroundColor Red
+                exit 1
+            }
+            
+            # Get the first most recent release
+            $release = $releases[0]
+            Write-Host "[DEBUG] Found release: $($release.tag_name)" -ForegroundColor DarkGray
+            Write-Host "[DEBUG] Release name: $($release.name)" -ForegroundColor DarkGray
+            Write-Host "[DEBUG] Assets count: $($release.assets.Count)" -ForegroundColor DarkGray
+            
+            # list all assets for debugging
+            Write-Host "[DEBUG] Available assets:" -ForegroundColor DarkGray
+            foreach ($asset in $release.assets) {
+                Write-Host "  - $($asset.name) ($('{0:N2}' -f ($asset.size/1MB)) MB)" -ForegroundColor DarkGray
+            }
+            
+            return $release
+        } catch {
+            Write-Host "Error: Could not reach GitHub API" -ForegroundColor Red
+            Write-Host "Error details: $_" -ForegroundColor Red
+            exit 1
+        }
     }
 }
 
-# Main Installation
+# main Installation
 Write-Host ""
 Write-Host "================================" -ForegroundColor Cyan
 Write-Host "    $appName Installer" -ForegroundColor Cyan  
@@ -94,10 +126,19 @@ if ($running) {
 $exeAsset = $release.assets | Where-Object { $_.name -eq $exeName }
 if (-not $exeAsset) {
     Write-Host "Error: Could not find $exeName in release assets" -ForegroundColor Red
+    Write-Host "Looking for: $exeName" -ForegroundColor Red
+    Write-Host "Available files:" -ForegroundColor Yellow
+    foreach ($asset in $release.assets) {
+        Write-Host "  - $($asset.name)" -ForegroundColor Yellow
+    }
+    Write-Host "" -ForegroundColor Red
+    Write-Host "Make sure you uploaded $exeName to the GitHub release!" -ForegroundColor Red
+    pause
     exit 1
 }
 
 Write-Host "Downloading $exeName..." -ForegroundColor Yellow
+Write-Host "[DEBUG] Download URL: $($exeAsset.browser_download_url)" -ForegroundColor DarkGray
 Invoke-WebRequest -Uri $exeAsset.browser_download_url -OutFile "$installPath\$exeName"
 
 # download any additional files
